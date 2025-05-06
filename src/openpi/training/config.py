@@ -742,7 +742,7 @@ _CONFIGS = [
         # model=pi0.Pi0Config(),
         model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         data=LeRobotFrankaDataConfig(  # 使用自定义数据配置
-            repo_id="pick_the_box",
+            repo_id="pick_data",
             default_prompt="pick the box",
             base_config=DataConfig(
                 local_files_only=True,
@@ -765,6 +765,9 @@ _CONFIGS = [
         freeze_filter=pi0.Pi0Config(
             paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
         ).get_freeze_filter(),
+        # freeze_filter=pi0.Pi0Config(
+        #     paligemma_variant="gemma_2b_lora"
+        # ).get_freeze_filter(),
         # Turn off EMA for LoRA finetuning.
         ema_decay=None,
     ),

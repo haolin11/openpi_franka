@@ -28,7 +28,7 @@ The repo has been tested with Ubuntu 22.04, we do not currently support other op
 When cloning this repo, make sure to update submodules:
 
 ```bash
-git clone --recurse-submodules git@github.com:Physical-Intelligence/openpi.git
+git clone --recurse-submodules https://github.com/haolin11/openpi_franka.git
 
 # Or if you already cloned the repo:
 git submodule update --init --recursive
@@ -37,8 +37,8 @@ git submodule update --init --recursive
 We use [uv](https://docs.astral.sh/uv/) to manage Python dependencies. See the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/) to set it up. Once uv is installed, run the following to set up the environment:
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
+GIT_LFS_SKIP_SMUDGE=1 proxychains uv sync # 使用代理执行一遍，再不使用代理执行一遍
+GIT_LFS_SKIP_SMUDGE=1 uv pip install -e . # 同样
 ```
 
 NOTE: `GIT_LFS_SKIP_SMUDGE=1` is needed to pull LeRobot as a dependency.
@@ -138,13 +138,14 @@ We provide example fine-tuning configs for both, [π₀](src/openpi/training/con
 Before we can run training, we need to compute the normalization statistics for the training data. Run the script below with the name of your training config:
 
 ```bash
-uv run scripts/compute_norm_stats.py --config-name pi0_fast_libero
+#先要把本地的数据集推送到本地huggingface(例如可复制到.cache/huggingface/lerobot/pick_the_box)，注意记录repo_id，在openpi_franka/src/openpi/training/config.py中修改pi0_franka的repo_id
+uv run scripts/compute_norm_stats.py --config-name pi0_franka
 ```
 
 Now we can kick off training with the following command (the `--overwrite` flag is used to overwrite existing checkpoints if you rerun fine-tuning with the same config):
 
 ```bash
-XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py pi0_fast_libero --exp-name=my_experiment --overwrite
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 proxychains uv run scripts/train.py pi0_franka --exp-name=my_experiment --overwrite
 ```
 
 The command will log training progress to the console and save checkpoints to the `checkpoints` directory. You can also monitor training progress on the Weights & Biases dashboard. For maximally using the GPU memory, set `XLA_PYTHON_CLIENT_MEM_FRACTION=0.9` before running training -- this enables JAX to use up to 90% of the GPU memory (vs. the default of 75%).
