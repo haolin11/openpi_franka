@@ -139,6 +139,7 @@ Before we can run training, we need to compute the normalization statistics for 
 
 ```bash
 #先要把本地的数据集推送到本地huggingface(例如可复制到.cache/huggingface/lerobot/pick_the_box)，注意记录repo_id，在openpi_franka/src/openpi/training/config.py中修改pi0_franka的repo_id
+#注意代码中local_batch_size需要改为所用显卡的倍数，不然会报错
 uv run scripts/compute_norm_stats.py --config-name pi0_franka
 ```
 
@@ -158,6 +159,8 @@ Once training is complete, we can run inference by spinning up a policy server a
 
 ```bash
 uv run scripts/serve_policy.py policy:checkpoint --policy.config=pi0_fast_libero --policy.dir=checkpoints/pi0_fast_libero/my_experiment/20000
+# uv run scripts/serve_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/ubuntu/openpi/checkpoints/pi0_franka/pick_franka
+# 然后在franka的控制电脑中的polymetis-local环境里安装openpi-client,安装完后运行examples/franka/real_franka.py进行实机控制
 ```
 
 This will spin up a server that listens on port 8000 and waits for observations to be sent to it. We can then run the Libero evaluation script to query the server. For instructions how to install Libero and run the evaluation script, see the [Libero README](examples/libero/README.md).

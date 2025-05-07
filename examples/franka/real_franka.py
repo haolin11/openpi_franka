@@ -9,7 +9,7 @@ import torch
 
 # Outside of episode loop, initialize the policy client.
 # Point to the host and port of the policy server (localhost and 8000 are the defaults).
-client = websocket_client_policy.WebsocketClientPolicy(host="172.16.97.95", port=8000)
+client = websocket_client_policy.WebsocketClientPolicy(host="192.168.1.70", port=8000)
 
 
 class DataTrans:
@@ -131,8 +131,23 @@ wrist_image = datatrans._get_wrist_camera_image()
 time.sleep(1)
 
 num_steps = 50
-
+datatrans.robot.go_home()
+datatrans.gripper.goto(width=0.08, speed=0.1, force=10.0, blocking=False)
+pos, qua = datatrans.robot.get_ee_pose()
+pos[2] -= 0.3
+pos[1] +=0.00
+# pos[0] += 0.1
+# time.sleep(0.3)
+datatrans.robot.move_to_ee_pose(pos, qua) 
+time.sleep(1)  
+# 启动关节阻抗控制
+print("启动关节阻抗控制...")
+datatrans.robot.start_joint_impedance(blocking=False)
+time.sleep(0.1)  # 等待控制器初始化
 for step in range(num_steps):
+    state = datatrans._get_robot_state()
+    global_image = datatrans._get_global_camera_image()
+    wrist_image = datatrans._get_wrist_camera_image()
     # Inside the episode loop, construct the observation.
     # Resize images on the client side to minimize bandwidth / latency. Always return images in uint8 format.
     # We provide utilities for resizing images + uint8 conversion so you match the training routines.
@@ -142,18 +157,14 @@ for step in range(num_steps):
         "observation/state": state,
         "observation/image": global_image,
         "observation/wrist_image": wrist_image,
-        "prompt": "pick the box",
+        "prompt": "pick the tissue box",
     }
 
     # 从策略服务器获取动作序列
     print("向策略服务器请求动作序列...")
     action_chunk = client.infer(observation)["actions"]
-    print(f"获得动作序列，形状: {action_chunk.shape}")
+    print(f"获得动作序列: {action_chunk}")
 
-    # # 启动关节阻抗控制
-    # print("启动关节阻抗控制...")
-    # datatrans.robot.start_joint_impedance(blocking=False)
-    # time.sleep(0.1)  # 等待控制器初始化
 
     # 循环执行动作序列中的每一步
     try:
@@ -164,26 +175,36 @@ for step in range(num_steps):
             # 提取关节位置和夹爪宽度
             joint_positions = action[:7]  # 前7个值为关节角度
             gripper_width = action[7]     # 第8个值为夹爪宽度
-            
-            # 更新关节位置
+            # if i == 0:
+            #     datatrans.robot.move_to_joint_positions(torch.tensor(joint_positions))
+            #     if last_gripper_width is None or abs(gripper_width - last_gripper_width) > 0.005:
+            #         print(f"  夹爪宽度: {gripper_width:.4f}")
+            #         datatrans.gripper.goto(width=float(gripper_width), speed=0.1, force=10.0, blocking=False)
+            #         last_gripper_width = gripper_width
+            # else:
+                # 更新关节位置
             print(f"执行第 {i+1}/{len(action_chunk)} 步")
-            # datatrans.robot.update_desired_joint_positions(torch.tensor(joint_positions))
-            datatrans.robot.move_to_joint_positions(torch.tensor(joint_positions))
-            
+            try:
+                datatrans.robot.update_desired_joint_positions(torch.tensor(joint_positions))
+            except:
+                datatrans.robot.start_joint_impedance(blocking=False)
+                datatrans.robot.update_desired_joint_positions(torch.tensor(joint_positions))
+            # datatrans.robot.move_to_joint_positions(torch.tensor(joint_positions), 0.1)
+        
             # 控制夹爪宽度
-            if last_gripper_width is None or abs(gripper_width - last_gripper_width) > 0.001:
+            if last_gripper_width is None or abs(gripper_width - last_gripper_width) > 0.005:
                 print(f"  夹爪宽度: {gripper_width:.4f}")
                 datatrans.gripper.goto(width=float(gripper_width), speed=0.1, force=10.0, blocking=False)
                 last_gripper_width = gripper_width
             
             # 等待下一个控制周期
-            # time.sleep(0.1)  # 假设控制频率为10Hz
-    finally:
+            time.sleep(0.05)  # 假设控制频率为10Hz
+    except:
         # 终止当前策略
-        print("终止当前策略...")
+        print("终止关节阻抗控制...")
         datatrans.robot.terminate_current_policy()
 print("执行完成")
 
 
 # 确保服务端已经启动
-# uv run scripts/serve_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/ubuntu/openpi/checkpoints/pi0_franka/local_dataset_test/14999
+# uv run scripts/serve_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/ubuntu/openpi/checkpoints/pi0_franka/pick_franka
