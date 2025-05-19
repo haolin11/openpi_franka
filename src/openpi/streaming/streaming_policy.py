@@ -1,0 +1,110 @@
+import jax
+import jax.numpy as jnp
+import numpy as np
+from openpi.models.model import Observation
+import openpi.models.pi0 as pi0_module
+from openpi.policies.policy import Policy
+import types
+from openpi.shared.nnx_utils import module_jit
+
+class StreamingPolicy(Policy):
+    """大小脑分频策略：慢脑(视觉+语言)低频更新 kv_cache，快脑(动作专家)高频输出单步动作。"""
+    def __init__(self, model, *, num_diffusion_steps: int = 10, transforms=(), output_transforms=(), sample_kwargs=None, metadata=None):
+        # 调用父类 Policy __init__ 初始化 transforms, sample_kwargs, metadata
+        super().__init__(model, transforms=transforms, output_transforms=output_transforms, sample_kwargs=sample_kwargs, metadata=metadata)
+        # 保存底层模型以供 embed_prefix/suffix 使用
+        self._model = model
+        self._rng = jax.random.PRNGKey(0)
+        # 小脑上下文状态
+        self._kv_cache = None
+        self._prefix_mask = None
+        self._prefix_len = 0
+        # 扩散状态
+        self._x_t = None
+        self._time = None
+        self._num_diffusion_steps = num_diffusion_steps
+        # 新增：把后缀推理函数编译成 XLA 内核
+        self._suffix_step = jax.jit(self._suffix_step)
+        # 使用 module_jit 绑定并编译 embed_prefix + llm decode
+        def _embed_prefix_and_llm(model, obs_jax):
+            prefix_tokens, prefix_mask, prefix_ar = model.embed_prefix(obs_jax)
+            attn_mask = pi0_module.make_attn_mask(prefix_mask, prefix_ar)
+            positions = jnp.cumsum(prefix_mask, axis=1) - 1
+            (_, _), kv = model.PaliGemma.llm([prefix_tokens, None], mask=attn_mask, positions=positions)
+            prefix_len = prefix_mask.sum()
+            return kv, prefix_mask, prefix_len
+        self._model._embed_prefix_and_llm = types.MethodType(_embed_prefix_and_llm, self._model)
+        self._embed_prefix_fn = module_jit(self._model._embed_prefix_and_llm)
+
+    def infer(self, obs: dict) -> dict:
+        # 判断是否有新的视觉/语言输入
+        has_visual = any(k.startswith("image") for k in obs) or ("prompt" in obs)
+        # 前缀（慢脑）阶段，进行完整的 transforms
+        if has_visual:
+            # 预处理输入：执行 repack, data_transforms, model_transforms
+            inputs = self._input_transform(obs)
+            # 构造 batch_size=1 的 Observation
+            obs_jax = Observation.from_dict(jax.tree_map(lambda x: jnp.asarray(x)[None], inputs))
+            # 缓存 prefix Observation，用于后续 suffix
+            self._prefix_obs_jax = obs_jax
+            # 使用 module_jit 编译的 embed_prefix + llm 函数获取缓存
+            self._kv_cache, self._prefix_mask, self._prefix_len = self._embed_prefix_fn(obs_jax)
+            # 初始化扩散噪声/时间
+            batch = obs_jax.state.shape[0]
+            self._rng, subkey = jax.random.split(self._rng)
+            self._x_t = jax.random.normal(subkey, (batch, self._model.action_horizon, self._model.action_dim))
+            self._time = jnp.ones((batch,))
+        else:
+            # 快脑（suffix）阶段，仅更新 state
+            if not hasattr(self, '_prefix_obs_jax') or self._prefix_obs_jax is None:
+                raise RuntimeError('Suffix inference before any prefix step')
+            # 从 obs 中提取新的 proprioceptive state
+            if 'state' not in obs:
+                raise KeyError('state key is required for suffix inference')
+            new_state = jnp.asarray(obs['state'])[None]
+            # pad proprioceptive state to model.action_dim
+            pad_len = self._model.action_dim - new_state.shape[-1]
+            new_state = jnp.pad(new_state, ((0, 0), (0, pad_len)))
+            # 更新 prefix_obs_jax 中的 state
+            obs_jax = self._prefix_obs_jax.replace(state=new_state)
+
+        # 3) 使用已 JIT 编译的后缀步函数
+        v_t, self._x_t, self._time = self._suffix_step(
+            obs_jax, self._x_t, self._time, self._kv_cache, self._prefix_mask, self._prefix_len
+        )
+
+        # 5) 提取本帧动作并返回
+        action = np.asarray(self._x_t[0, 0])
+        # 根据原始观测 state 维度截断 action 向量
+        # prefix 阶段使用键 'observation/state'，suffix 阶段使用键 'state'
+        if 'state' in obs:
+            orig_dim = np.asarray(obs['state']).shape[-1]
+        elif 'observation/state' in obs:
+            orig_dim = np.asarray(obs['observation/state']).shape[-1]
+        else:
+            orig_dim = action.shape[-1]
+        action = action[:orig_dim]
+        return {"actions": action}
+
+    # 新增：后缀推理函数，JIT 编译后只保留核心计算
+    def _suffix_step(self, obs_jax, x_t, time, kv_cache, prefix_mask, prefix_len):
+        suffix_tokens, suffix_mask, suffix_ar = self._model.embed_suffix(obs_jax, x_t, time)
+        suffix_attn = pi0_module.make_attn_mask(suffix_mask, suffix_ar)
+        prefix_attn = jnp.broadcast_to(
+            prefix_mask[:, None, :],
+            suffix_attn.shape[:-1] + (prefix_mask.shape[-1],),
+        )
+        full_attn = jnp.concatenate([prefix_attn, suffix_attn], axis=-1)
+        positions = prefix_len + (jnp.cumsum(suffix_mask, axis=1) - 1)
+        (_, suffix_out), _ = self._model.PaliGemma.llm(
+            [None, suffix_tokens], mask=full_attn, positions=positions, kv_cache=kv_cache
+        )
+        v_t = self._model.action_out_proj(suffix_out[:, -self._model.action_horizon :])
+        dt = -1.0 / self._num_diffusion_steps
+        new_x_t = x_t + dt * v_t
+        new_time = time + dt
+        return v_t, new_x_t, new_time
+
+# 使用示例：
+# from openpi.streaming.streaming_policy import StreamingPolicy
+# policy = StreamingPolicy(model, num_diffusion_steps=10, transforms=..., output_transforms=...) 

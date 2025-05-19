@@ -176,7 +176,39 @@ We provide more examples for how to fine-tune and run inference with our models 
 - [ALOHA Real](examples/aloha_real)
 - [UR5](examples/ur5)
 
+## Streaming Fast-Slow System
 
+We have introduced a streaming fast-slow system to decouple low-frequency vision+language encoding (prefix) from high-frequency action outputs (suffix). The implementation is in `src/openpi/streaming/streaming_policy.py`, where:
+
+- The suffix step `_suffix_step` is JIT-compiled via `jax.jit` to accelerate diffusion updates.
+- The prefix step (visual + language encoding and KV cache initialization) is compiled with `module_jit` to freeze the model state and avoid recompilation overhead.
+
+To test streaming behavior, see the `examples/franka/test_stream_franka.py` script.
+
+### Single-Step Action Prediction
+
+To perform one-step action prediction (i.e., horizon=1), set `action_horizon` to `1` in your model configuration before training. For example:
+
+```bash
+# via CLI
+uv run scripts/train.py pi0_franka --config.model.action_horizon=1
+```
+
+This will configure the model to output single action steps, suitable for closed-loop control.
+
+### Launching the Streaming Policy Server
+
+To start the streaming fast-slow policy server:
+
+```bash
+uv run scripts/serve_stream_policy.py policy:checkpoint --policy.config=pi0_franka --policy.dir=<PATH_TO_CHECKPOINT>
+```
+
+Options:
+- `--port`: server port (default 8000)
+- `--num-diffusion-steps`: diffusion steps for suffix (default 10)
+- `--default_prompt`: default prompt if none provided
+- `--record`: record policy behavior to `policy_records/`
 
 ## Troubleshooting
 

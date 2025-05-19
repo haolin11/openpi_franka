@@ -321,7 +321,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
-# --------------此处修改------------------
+
 @dataclasses.dataclass(frozen=True)
 class LeRobotFrankaDataConfig(DataConfigFactory):
     """
@@ -740,6 +740,9 @@ _CONFIGS = [
     TrainConfig(
         name="pi0_franka",
         # model=pi0.Pi0Config(),
+        # model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
+        #                     action_horizon=1          # 改成 1 步长
+        #                     ),
         model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         data=LeRobotFrankaDataConfig(  # 使用自定义数据配置
             repo_id="pick_data1",

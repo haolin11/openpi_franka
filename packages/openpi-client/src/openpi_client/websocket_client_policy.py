@@ -27,7 +27,13 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
         logging.info(f"Waiting for server at {self._uri}...")
         while True:
             try:
-                conn = websockets.sync.client.connect(self._uri, compression=None, max_size=None)
+                conn = websockets.sync.client.connect(
+                    self._uri,
+                    compression=None,
+                    max_size=None,
+                    ping_interval=None,
+                    ping_timeout=None,
+                )
                 metadata = msgpack_numpy.unpackb(conn.recv())
                 return conn, metadata
             except ConnectionRefusedError:

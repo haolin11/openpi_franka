@@ -207,4 +207,5 @@ print("执行完成")
 
 
 # 确保服务端已经启动
-# uv run scripts/serve_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/ubuntu/openpi/checkpoints/pi0_franka/pick_franka
+# uv run scripts/serve_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/ubuntu/openpi/checkpoints/pi0_franka/lora_fine_tune/29999
+# uv run scripts/serve_stream_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/chenhaolin/openpi_franka/checkpoints/pi0_franka/lora_fine_tune/29999

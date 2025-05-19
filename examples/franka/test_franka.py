@@ -33,6 +33,4 @@ for step in range(num_steps):
 
 
 # 确保服务端已经启动
-# uv run scripts/serve_policy.py policy:checkpoint \
-# --policy.config=pi0_franka \
-# --policy.dir=/home/chengyilin/openpi/checkpoints/pi0_franka/local_dataset_test/14999
+# uv run scripts/serve_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/chengyilin/openpi/checkpoints/pi0_franka/local_dataset_test/14999
