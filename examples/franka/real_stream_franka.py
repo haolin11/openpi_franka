@@ -15,14 +15,6 @@ import pyrealsense2 as rs
 import cv2
 # from real_franka import DataTrans
 
-# 配置参数
-HOST = "localhost"
-PORT = 6000
-IMAGE_HZ = 0.5       # 慢脑（图像+语言）频率
-STATE_HZ = 50      # 快脑（状态）频率
-PROMPT = "pick the tissue box"
-
-
 class DataTrans:
 
     
@@ -134,6 +126,14 @@ class DataTrans:
         return np.concatenate([pos, quat]).astype(np.float64)
 
 
+# 配置参数
+HOST = "localhost"
+PORT = 6000
+IMAGE_HZ = 1       # 慢脑（图像+语言）频率
+STATE_HZ = 80      # 快脑（状态）频率
+PROMPT = "pick the tissue box"
+
+
 def main():
     # 初始化客户端
     client = websocket_client_policy.WebsocketClientPolicy(host=HOST, port=PORT)
@@ -145,29 +145,29 @@ def main():
     datatrans.robot.go_home()
     datatrans.gripper.goto(width=0.08, speed=0.1, force=10.0, blocking=False)
     pos, qua = datatrans.robot.get_ee_pose()
-    pos[2] -= 0.3
-    pos[1] +=0.00
+    pos[2] -= 0.25
+    pos[1] -=0.02
     # pos[0] += 0.1
     # time.sleep(0.3)
     datatrans.robot.move_to_ee_pose(pos, qua) 
-    time.sleep(3)
+    time.sleep(1)
     print("启动关节阻抗控制...")
     datatrans.robot.start_joint_impedance(blocking=False)
     time.sleep(0.1)
 
-    # # 模型预热
-    # print("模型预热：首次调用infer进行JIT编译，请耐心等待...")
-    # warm_state = datatrans._get_robot_state()
-    # warm_img = datatrans._get_global_camera_image()
-    # warm_wrist = datatrans._get_wrist_camera_image()
-    # dummy_obs = {
-    #     "observation/state": warm_state,
-    #     "observation/image": warm_img,
-    #     "observation/wrist_image": warm_wrist,
-    #     "prompt": "warmup",
-    # }
-    # _ = client.infer(dummy_obs)
-    # print("预热完成，开始流式推理...")
+    # 模型预热
+    print("模型预热：首次调用infer进行JIT编译，请耐心等待...")
+    warm_state = datatrans._get_robot_state()
+    warm_img = datatrans._get_global_camera_image()
+    warm_wrist = datatrans._get_wrist_camera_image()
+    dummy_obs = {
+        "observation/state": warm_state,
+        "observation/image": warm_img,
+        "observation/wrist_image": warm_wrist,
+        "prompt": "warmup",
+    }
+    _ = client.infer(dummy_obs)
+    print("预热完成，开始流式推理...")
 
     # 事件调度参数
     img_interval = 1.0 / IMAGE_HZ
@@ -216,17 +216,18 @@ def main():
             t_inf = time.time() - t0
             elapsed = time.time() - start_time
             print(f"{event} @ {elapsed:.3f}s (推理耗时 {t_inf:.3f}s) -> action: {action}")
-
+            if event == "prefix":
+                continue
             # 执行动作
             joint_pos = action[0, :7]
             gripper_w = action[0, 7]
             try:
-                # datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
-                pass
+                datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
+                # pass
             except Exception:
                 datatrans.robot.start_joint_impedance(blocking=False)
                 # datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
-            if last_gripper_width is None or abs(gripper_w - last_gripper_width) > 0.005:
+            if last_gripper_width is None or abs(gripper_w - last_gripper_width) > 0.03:
                 datatrans.gripper.goto(width=float(gripper_w), speed=0.1, force=10.0, blocking=False)
                 last_gripper_width = gripper_w
 
@@ -243,3 +244,6 @@ def main():
 
 if __name__ == "__main__":
     main() 
+
+# 注意提前运行
+# uv run scripts/serve_stream_policy.py policy:checkpoint  --policy.config=pi0_franka  --policy.dir=/home/chenhaolin/openpi_franka/checkpoints/pi0_franka/lora_fine_tune/29999

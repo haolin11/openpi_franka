@@ -76,10 +76,8 @@ class StreamingPolicy(Policy):
             self._kv_cache, self._prefix_mask, self._prefix_len = self._embed_prefix_fn(obs_jax)
             # 初始化扩散噪声/时间
             batch = obs_jax.state.shape[0]
-            if self._fixed_noise is None:
-                self._rng, subkey = jax.random.split(self._rng)
-                self._fixed_noise = jax.random.normal(subkey, (batch, self._model.action_horizon, self._model.action_dim))
-            self._x_t = self._fixed_noise
+            self._rng, subkey = jax.random.split(self._rng)
+            self._x_t = jax.random.normal(subkey, (batch, self._model.action_horizon, self._model.action_dim))
             self._time = jnp.ones((batch,))
             # 执行完整的扩散过程
             for _ in range(self._num_diffusion_steps):
@@ -103,8 +101,10 @@ class StreamingPolicy(Policy):
             # 使用缓存的前缀观察，只更新状态
             obs_jax = self._prefix_obs_jax.replace(state=new_state)
             
-            # 使用与prefix相同的初始噪声和时间
-            self._x_t = self._fixed_noise
+            # 生成新的随机噪声
+            batch = obs_jax.state.shape[0]
+            self._rng, subkey = jax.random.split(self._rng)
+            self._x_t = jax.random.normal(subkey, (batch, self._model.action_horizon, self._model.action_dim))
             self._time = jnp.ones((obs_jax.state.shape[0],))
             
             # 执行完整的扩散过程

@@ -31,9 +31,6 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
                     self._uri,
                     compression=None,
                     max_size=None,
-                    ping_interval=20,  # 每20秒发送一次ping
-                    ping_timeout=10,   # ping超时时间为10秒
-                    close_timeout=10,  # 关闭连接超时时间为10秒
                 )
                 metadata = msgpack_numpy.unpackb(conn.recv())
                 return conn, metadata
