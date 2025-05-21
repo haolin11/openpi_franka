@@ -6,6 +6,7 @@ import openpi.models.pi0 as pi0_module
 from openpi.policies.policy import Policy
 import types
 from openpi.shared.nnx_utils import module_jit
+from openpi.transforms import pad_to_dim, Normalize  # 新增：后缀阶段 state pad & normalize
 
 class StreamingPolicy(Policy):
     """大小脑分频策略：慢脑(视觉+语言)低频更新 kv_cache，快脑(动作专家)高频输出单步动作。"""
@@ -14,7 +15,7 @@ class StreamingPolicy(Policy):
         super().__init__(model, transforms=transforms, output_transforms=output_transforms, sample_kwargs=sample_kwargs, metadata=metadata)
         # 保存底层模型以供 embed_prefix/suffix 使用
         self._model = model
-        self._rng = jax.random.PRNGKey(0)
+        self._rng = jax.random.PRNGKey(0)  # 使用与原版pi0相同的随机种子
         # 小脑上下文状态
         self._kv_cache = None
         self._prefix_mask = None
@@ -35,6 +36,30 @@ class StreamingPolicy(Policy):
             return kv, prefix_mask, prefix_len
         self._model._embed_prefix_and_llm = types.MethodType(_embed_prefix_and_llm, self._model)
         self._embed_prefix_fn = module_jit(self._model._embed_prefix_and_llm)
+        # 递归查找 Normalize 实例，用于后缀阶段对 state 归一化
+        def _find_normalize(transform):
+            if isinstance(transform, Normalize):
+                return transform
+            if hasattr(transform, 'transforms'):
+                for sub in transform.transforms:
+                    found = _find_normalize(sub)
+                    if found is not None:
+                        return found
+            return None
+        self._normalize = _find_normalize(self._input_transform)
+        if self._normalize is None:
+            raise RuntimeError('无法找到 Normalize 变换')
+        # 预生成固定的扩散噪声
+        self._fixed_noise = None
+
+    def _transform_state(self, state: np.ndarray) -> np.ndarray:
+        """专门用于处理状态的转换函数"""
+        # 先进行维度填充
+        state = pad_to_dim(state, self._model.action_dim)
+        # 再进行归一化
+        if self._normalize is not None:
+            state = self._normalize({"state": state})["state"]
+        return state
 
     def infer(self, obs: dict) -> dict:
         # 判断是否有新的视觉/语言输入
@@ -51,27 +76,49 @@ class StreamingPolicy(Policy):
             self._kv_cache, self._prefix_mask, self._prefix_len = self._embed_prefix_fn(obs_jax)
             # 初始化扩散噪声/时间
             batch = obs_jax.state.shape[0]
-            self._rng, subkey = jax.random.split(self._rng)
-            self._x_t = jax.random.normal(subkey, (batch, self._model.action_horizon, self._model.action_dim))
+            if self._fixed_noise is None:
+                self._rng, subkey = jax.random.split(self._rng)
+                self._fixed_noise = jax.random.normal(subkey, (batch, self._model.action_horizon, self._model.action_dim))
+            self._x_t = self._fixed_noise
             self._time = jnp.ones((batch,))
+            # 执行完整的扩散过程
+            for _ in range(self._num_diffusion_steps):
+                v_t, self._x_t, self._time = self._suffix_step(
+                    obs_jax, self._x_t, self._time, self._kv_cache, self._prefix_mask, self._prefix_len
+                )
+            # 缓存最终的动作值和状态
+            self._last_prefix_action = self._x_t.copy()
+            self._last_prefix_state = obs_jax.state.copy()
         else:
             # 快脑（suffix）阶段，仅更新 state
             if not hasattr(self, '_prefix_obs_jax') or self._prefix_obs_jax is None:
                 raise RuntimeError('Suffix inference before any prefix step')
-            # 从 obs 中提取新的 proprioceptive state
-            if 'state' not in obs:
-                raise KeyError('state key is required for suffix inference')
-            new_state = jnp.asarray(obs['state'])[None]
+            if 'observation/state' not in obs:
+                raise KeyError('observation/state key is required for suffix inference')
+            
+            # 使用专门的状态转换函数处理状态
+            new_state = self._transform_state(obs['observation/state'])
+            new_state = jnp.asarray(new_state)[None]
+            
+            # 使用缓存的前缀观察，只更新状态
             obs_jax = self._prefix_obs_jax.replace(state=new_state)
+            
+            # 使用与prefix相同的初始噪声和时间
+            self._x_t = self._fixed_noise
+            self._time = jnp.ones((obs_jax.state.shape[0],))
+            
+            # 执行完整的扩散过程
+            for _ in range(self._num_diffusion_steps):
+                v_t, self._x_t, self._time = self._suffix_step(
+                    obs_jax, self._x_t, self._time, self._kv_cache, self._prefix_mask, self._prefix_len
+                )
 
-        # 3) 使用已 JIT 编译的后缀步函数
-        v_t, self._x_t, self._time = self._suffix_step(
-            obs_jax, self._x_t, self._time, self._kv_cache, self._prefix_mask, self._prefix_len
-        )
-
-        # 5) 提取本帧动作并返回
+        # 提取本帧动作并返回
         action = np.asarray(self._x_t[0])
-        return {"actions": action}
+        # 同时返回state，供输出变换使用
+        state_out = np.asarray(obs_jax.state[0])
+        outputs = {"state": state_out, "actions": action}
+        return self._output_transform(outputs)
 
     # 新增：后缀推理函数，JIT 编译后只保留核心计算
     def _suffix_step(self, obs_jax, x_t, time, kv_cache, prefix_mask, prefix_len):

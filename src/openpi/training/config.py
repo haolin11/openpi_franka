@@ -739,11 +739,8 @@ _CONFIGS = [
     # --------------此处修改------------------
     TrainConfig(
         name="pi0_franka",
-        # model=pi0.Pi0Config(),
-        # model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora",
-        #                     action_horizon=1          # 改成 1 步长
-        #                     ),
-        model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora", action_horizon=1),
+        # model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         data=LeRobotFrankaDataConfig(  # 使用自定义数据配置
             repo_id="pick_data1",
             default_prompt="pick the box",
@@ -761,7 +758,7 @@ _CONFIGS = [
         # weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
         # 其他训练参数
         num_train_steps=30_000,
-        batch_size=8,
+        batch_size=3,
         save_interval=10000,
         exp_name="local_dataset_finetune_LoRA",  # 在命令行可覆盖
 

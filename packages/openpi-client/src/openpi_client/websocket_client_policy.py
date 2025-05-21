@@ -31,24 +31,40 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
                     self._uri,
                     compression=None,
                     max_size=None,
-                    # ping_interval=None,
-                    # ping_timeout=None,
+                    ping_interval=20,  # 每20秒发送一次ping
+                    ping_timeout=10,   # ping超时时间为10秒
+                    close_timeout=10,  # 关闭连接超时时间为10秒
                 )
                 metadata = msgpack_numpy.unpackb(conn.recv())
                 return conn, metadata
             except ConnectionRefusedError:
                 logging.info("Still waiting for server...")
                 time.sleep(5)
+            except Exception as e:
+                logging.error(f"Connection error: {e}")
+                time.sleep(5)
 
     @override
     def infer(self, obs: Dict) -> Dict:  # noqa: UP006
-        data = self._packer.pack(obs)
-        self._ws.send(data)
-        response = self._ws.recv()
-        if isinstance(response, str):
-            # we're expecting bytes; if the server sends a string, it's an error.
-            raise RuntimeError(f"Error in inference server:\n{response}")
-        return msgpack_numpy.unpackb(response)
+        max_retries = 3
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                data = self._packer.pack(obs)
+                self._ws.send(data)
+                response = self._ws.recv()
+                if isinstance(response, str):
+                    # we're expecting bytes; if the server sends a string, it's an error.
+                    raise RuntimeError(f"Error in inference server:\n{response}")
+                return msgpack_numpy.unpackb(response)
+            except Exception as e:
+                retry_count += 1
+                if retry_count == max_retries:
+                    raise RuntimeError(f"Failed to get response after {max_retries} retries: {e}")
+                logging.warning(f"Connection error during inference, retrying ({retry_count}/{max_retries}): {e}")
+                # 重新连接
+                self._ws, self._server_metadata = self._wait_for_server()
+                time.sleep(1)  # 等待1秒后重试
 
     @override
     def reset(self) -> None:

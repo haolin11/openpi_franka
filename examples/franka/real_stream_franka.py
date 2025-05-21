@@ -19,7 +19,7 @@ import cv2
 HOST = "localhost"
 PORT = 6000
 IMAGE_HZ = 0.5       # 慢脑（图像+语言）频率
-STATE_HZ = 5      # 快脑（状态）频率
+STATE_HZ = 50      # 快脑（状态）频率
 PROMPT = "pick the tissue box"
 
 
@@ -156,18 +156,18 @@ def main():
     time.sleep(0.1)
 
     # # 模型预热
-    print("模型预热：首次调用infer进行JIT编译，请耐心等待...")
-    warm_state = datatrans._get_robot_state()
-    warm_img = datatrans._get_global_camera_image()
-    warm_wrist = datatrans._get_wrist_camera_image()
-    dummy_obs = {
-        "observation/state": warm_state,
-        "observation/image": warm_img,
-        "observation/wrist_image": warm_wrist,
-        "prompt": "warmup",
-    }
-    _ = client.infer(dummy_obs)
-    print("预热完成，开始流式推理...")
+    # print("模型预热：首次调用infer进行JIT编译，请耐心等待...")
+    # warm_state = datatrans._get_robot_state()
+    # warm_img = datatrans._get_global_camera_image()
+    # warm_wrist = datatrans._get_wrist_camera_image()
+    # dummy_obs = {
+    #     "observation/state": warm_state,
+    #     "observation/image": warm_img,
+    #     "observation/wrist_image": warm_wrist,
+    #     "prompt": "warmup",
+    # }
+    # _ = client.infer(dummy_obs)
+    # print("预热完成，开始流式推理...")
 
     # 事件调度参数
     img_interval = 1.0 / IMAGE_HZ
@@ -208,7 +208,7 @@ def main():
                 }
             else:
                 state = datatrans._get_robot_state()
-                obs = {"state": state}
+                obs = {"observation/state": state}
 
             # 推理
             t0 = time.time()
@@ -218,13 +218,14 @@ def main():
             print(f"{event} @ {elapsed:.3f}s (推理耗时 {t_inf:.3f}s) -> action: {action}")
 
             # 执行动作
-            joint_pos = action[:7]
-            gripper_w = action[7]
+            joint_pos = action[0, :7]
+            gripper_w = action[0, 7]
             try:
-                datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
+                # datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
+                pass
             except Exception:
                 datatrans.robot.start_joint_impedance(blocking=False)
-                datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
+                # datatrans.robot.update_desired_joint_positions(torch.tensor(joint_pos))
             if last_gripper_width is None or abs(gripper_w - last_gripper_width) > 0.005:
                 datatrans.gripper.goto(width=float(gripper_w), speed=0.1, force=10.0, blocking=False)
                 last_gripper_width = gripper_w
