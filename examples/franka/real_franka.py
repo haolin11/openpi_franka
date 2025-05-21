@@ -9,7 +9,8 @@ import torch
 
 # Outside of episode loop, initialize the policy client.
 # Point to the host and port of the policy server (localhost and 8000 are the defaults).
-client = websocket_client_policy.WebsocketClientPolicy(host="192.168.1.70", port=8000)
+# client = websocket_client_policy.WebsocketClientPolicy(host="172.16.97.97", port=8000)
+client = websocket_client_policy.WebsocketClientPolicy("localhost", port=6000)
 
 
 class DataTrans:

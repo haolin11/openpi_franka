@@ -31,8 +31,8 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
                     self._uri,
                     compression=None,
                     max_size=None,
-                    ping_interval=None,
-                    ping_timeout=None,
+                    # ping_interval=None,
+                    # ping_timeout=None,
                 )
                 metadata = msgpack_numpy.unpackb(conn.recv())
                 return conn, metadata

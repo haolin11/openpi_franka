@@ -62,10 +62,6 @@ class StreamingPolicy(Policy):
             if 'state' not in obs:
                 raise KeyError('state key is required for suffix inference')
             new_state = jnp.asarray(obs['state'])[None]
-            # pad proprioceptive state to model.action_dim
-            pad_len = self._model.action_dim - new_state.shape[-1]
-            new_state = jnp.pad(new_state, ((0, 0), (0, pad_len)))
-            # 更新 prefix_obs_jax 中的 state
             obs_jax = self._prefix_obs_jax.replace(state=new_state)
 
         # 3) 使用已 JIT 编译的后缀步函数
@@ -74,16 +70,7 @@ class StreamingPolicy(Policy):
         )
 
         # 5) 提取本帧动作并返回
-        action = np.asarray(self._x_t[0, 0])
-        # 根据原始观测 state 维度截断 action 向量
-        # prefix 阶段使用键 'observation/state'，suffix 阶段使用键 'state'
-        if 'state' in obs:
-            orig_dim = np.asarray(obs['state']).shape[-1]
-        elif 'observation/state' in obs:
-            orig_dim = np.asarray(obs['observation/state']).shape[-1]
-        else:
-            orig_dim = action.shape[-1]
-        action = action[:orig_dim]
+        action = np.asarray(self._x_t[0])
         return {"actions": action}
 
     # 新增：后缀推理函数，JIT 编译后只保留核心计算

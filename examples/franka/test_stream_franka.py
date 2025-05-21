@@ -6,7 +6,7 @@ import time
 # 测试 StreamingPolicy 的快慢系统行为
 # 确保已经启动 server_stream_policy.py (流式服务) 在 localhost:8000
 
-client = websocket_client_policy.WebsocketClientPolicy(host="localhost", port=8000)
+client = websocket_client_policy.WebsocketClientPolicy(host="localhost", port=6000)
 print("模型预热：首次调用infer进行JIT编译，请耐心等待...")
 dummy_prefix = {
     "observation/state": np.zeros(8),
